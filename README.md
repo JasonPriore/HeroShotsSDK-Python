@@ -53,6 +53,11 @@ print(final["final_video_url"])                       # also: final.final_video_
 Responses support both `result["key"]` and `result.key` access. `/api/v1`
 billing metadata is under `result["_meta"]`.
 
+## Guide
+
+For step-by-step examples organized by use case, read the full guide:
+[GUIDE.md](https://github.com/JasonPriore/HeroShotsSDK-Python/blob/main/GUIDE.md).
+
 ## Resources
 
 `uploads` · `images` · `videos` · `longvideo` · `stilllife` · `storyboard` ·
