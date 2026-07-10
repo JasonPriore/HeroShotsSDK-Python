@@ -28,7 +28,8 @@ def main(product_path: str, model_path: str) -> None:
 
     duration = 30
     # 2. (Optional) check the balance before spending credits.
-    print("balance:", client.balance())
+    bal = client.balance()
+    print("balance:", {"hs_credits": bal.get("hs_credits"), "wallet_balance": bal.get("wallet_balance")})
 
     # 3. Brief suggestions.
     briefs = client.storyboard.brief_suggestions(

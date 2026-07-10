@@ -15,6 +15,7 @@ L'SDK copre esattamente queste capacità:
 | Studio Hero (storyboard, tutte le fasi) | `storyboard` + `longvideo` |
 | Avatar: vedere i propri + default, generarne | `avatars` |
 | Consultare il balance | `client.balance()` |
+| Consultare stats account complete | `client.stats()` |
 | Caricare file → URL ospitato (usato da tutto) | `uploads` |
 
 ---
@@ -60,16 +61,20 @@ Tre concetti validi per tutto l'SDK:
 Consulta i crediti residui prima di generare.
 
 ```python
-bal = client.balance()   # GET /api/auth/stats
+bal = client.balance()   # vista compatta di GET /api/auth/stats
 
 print("HS credits:", bal["hs_credits"])
-print("Wallet:", bal["plan"]["wallet_balance"], "€")
+print("Wallet:", bal["wallet_balance"], "€")
+
+# Se vuoi la risposta completa dell'endpoint (recent_generations, piani, flag):
+stats = client.stats()
 ```
 
 **Esempio di risultato:**
 ```json
 {
   "hs_credits": 1240,
+  "wallet_balance": 48.5,
   "total_credits_used": 360,
   "plan": { "wallet_balance": 48.5, "template_id": "scale", "output_resolution": "4K" }
 }

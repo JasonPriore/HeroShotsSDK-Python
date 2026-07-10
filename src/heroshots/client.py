@@ -112,12 +112,53 @@ class HeroShotsClient:
         """GET /api/auth/me -> current authenticated profile."""
         return self.request("GET", "/api/auth/me")
 
-    def balance(self) -> dict[str, Any]:
-        """GET /api/auth/stats -> account balance.
+    def stats(self) -> dict[str, Any]:
+        """GET /api/auth/stats -> full account stats.
 
-        Includes ``hs_credits``, ``total_credits_used`` and ``plan.wallet_balance``.
+        This is the raw portal stats payload and may include recent generations,
+        offered plans, feature flags and billing details.
         """
         return self.request("GET", "/api/auth/stats")
+
+    def balance(self) -> dict[str, Any]:
+        """Return a compact account balance view from ``/api/auth/stats``.
+
+        Use :meth:`stats` when you need the full raw stats payload.
+        """
+        stats = self.stats()
+        plan = stats.get("plan") if isinstance(stats, dict) else {}
+        if not isinstance(plan, dict):
+            plan = {}
+
+        keys = [
+            "hs_credits",
+            "total_credits_used",
+            "total_cost_charged",
+            "current_month_cost",
+            "current_month_generations",
+            "total_generations",
+            "video_package_credits_remaining",
+            "free_preview_videos_remaining",
+            "use_wallet",
+        ]
+        out = {key: stats[key] for key in keys if isinstance(stats, dict) and key in stats}
+
+        plan_keys = [
+            "wallet_balance",
+            "template_id",
+            "billing_type",
+            "output_resolution",
+            "has_watermark",
+            "offered_plan_id",
+            "monthly_price",
+        ]
+        compact_plan = {key: plan[key] for key in plan_keys if key in plan}
+        if compact_plan:
+            out["plan"] = compact_plan
+        if "wallet_balance" in compact_plan:
+            out["wallet_balance"] = compact_plan["wallet_balance"]
+
+        return wrap(out)
 
     # -- transport ------------------------------------------------------------
 

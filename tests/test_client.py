@@ -55,14 +55,42 @@ def test_v1_envelope_is_unwrapped():
 def test_portal_response_is_bare():
     responses.get(
         f"{BASE}/api/auth/stats",
-        json={"hs_credits": 120, "total_credits_used": 30, "plan": {"wallet_balance": 9.5}},
+        json={
+            "hs_credits": 120,
+            "total_credits_used": 30,
+            "current_month_generations": 4,
+            "plan": {"wallet_balance": 9.5, "template_id": "free"},
+            "recent_generations": [{"id": 1}],
+            "offered_plans": [{"id": 1}],
+        },
         status=200,
     )
     client = make_client()
     out = client.balance()
     assert out["hs_credits"] == 120
     assert out["plan"]["wallet_balance"] == 9.5
+    assert out.wallet_balance == 9.5
+    assert out.current_month_generations == 4
+    assert "recent_generations" not in out
+    assert "offered_plans" not in out
     assert "data" not in out
+
+
+@responses.activate
+def test_stats_returns_raw_account_stats():
+    responses.get(
+        f"{BASE}/api/auth/stats",
+        json={
+            "hs_credits": 120,
+            "plan": {"wallet_balance": 9.5},
+            "recent_generations": [{"id": 1}],
+            "offered_plans": [{"id": 1}],
+        },
+        status=200,
+    )
+    out = make_client().stats()
+    assert out["recent_generations"][0]["id"] == 1
+    assert out["offered_plans"][0]["id"] == 1
 
 
 @responses.activate
