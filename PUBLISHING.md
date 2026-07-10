@@ -35,7 +35,7 @@ publisher flow. The first successful workflow run will create the project.
 4. Create and push a matching tag:
 
    ```bash
-   git tag v0.2.2
+   git tag v0.2.3
    git push origin main --tags
    ```
 
