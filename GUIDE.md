@@ -22,6 +22,7 @@ L'SDK copre esattamente queste capacità:
 
 ## Indice
 - [0. Setup e concetti](#0-setup-e-concetti)
+- [0.1 Agenzie: selezionare il brand/utente gestito](#01-agenzie-selezionare-il-brandutente-gestito)
 - [1. Balance](#1-balance)
 - [2. Foto](#2-foto)
 - [3. Video corto](#3-video-corto)
@@ -53,6 +54,41 @@ Tre concetti validi per tutto l'SDK:
 
 > Le risposte permettono sia `res["chiave"]` sia `res.chiave`. I metadati di
 > billing degli endpoint `/api/v1` sono sotto `res["_meta"]`.
+
+---
+
+## 0.1 Agenzie: selezionare il brand/utente gestito
+
+Se usi una **API key agenzia**, prima scegli il brand/utente gestito su cui vuoi
+operare. Il valore è il `managed_user_id` restituito dalla creazione/lista dei
+managed client. Dopo averlo impostato, usi gli stessi metodi di generazione delle
+sezioni successive: l'SDK aggiunge `X-Managed-User-Id` alle richieste autenticate.
+
+```python
+from heroshots import Client
+
+client = Client(
+    token="lz_live_YOUR_AGENCY_KEY",
+    managed_user_id=12345,  # brand/utente gestito selezionato
+)
+
+# Da qui in poi le generazioni vengono eseguite come quel brand.
+gen = client.images.generate(
+    product_image_url="product.jpg",
+    still_life=True,
+    ratio="1:1",
+)
+
+# Per passare a un altro brand gestito senza ricreare il client:
+client.with_managed_user(67890)
+v = client.videos.generate("product.jpg", custom_prompt="slow dolly-in")
+
+# Per tornare a chiamate senza act-as:
+client.with_managed_user(None)
+```
+
+La key agenzia deve avere `agency:act_as` e gli scope richiesti dalla route di
+generazione. Lo stato della relazione e gli scope vengono validati dall'API.
 
 ---
 

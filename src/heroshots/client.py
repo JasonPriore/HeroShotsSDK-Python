@@ -1,9 +1,9 @@
 """HeroShots API client.
 
-Authenticates with a **portal JWT** (``Authorization: Bearer <token>``). The token
-is obtained from ``POST /api/auth/login`` (HS256, 7-day TTL, no refresh endpoint -
-re-login to renew). The client transparently handles the two response envelope
-styles used by the backend:
+Authenticates with a **portal JWT or API key** (``Authorization: Bearer <token>``).
+Portal JWTs are obtained from ``POST /api/auth/login`` (HS256, 7-day TTL, no
+refresh endpoint - re-login to renew). The client transparently handles the two
+response envelope styles used by the backend:
 
 * ``/api/v1/*``        -> ``{"success", "data", "meta"}`` -> unwrapped to ``data``
 * everything else      -> bare JSON, returned as-is
@@ -12,7 +12,7 @@ styles used by the backend:
 from __future__ import annotations
 
 import os
-from typing import Any, BinaryIO, Optional
+from typing import Any, BinaryIO, Optional, Union
 
 import requests
 
@@ -46,6 +46,7 @@ class HeroShotsClient:
         *,
         email: Optional[str] = None,
         password: Optional[str] = None,
+        managed_user_id: Optional[Union[str, int]] = None,
         timeout: float = DEFAULT_TIMEOUT,
         session: Optional[requests.Session] = None,
         auto_relogin: bool = True,
@@ -53,6 +54,7 @@ class HeroShotsClient:
         base_url = base_url or os.environ.get("HEROSHOTS_BASE_URL") or DEFAULT_BASE_URL
         self.base_url = base_url.rstrip("/")
         self.token = token
+        self.managed_user_id = managed_user_id
         self._email = email
         self._password = password
         self._auto_relogin = auto_relogin
@@ -160,6 +162,11 @@ class HeroShotsClient:
 
         return wrap(out)
 
+    def with_managed_user(self, managed_user_id: Optional[Union[str, int]]) -> "HeroShotsClient":
+        """Set the managed brand target for agency act-as requests."""
+        self.managed_user_id = managed_user_id
+        return self
+
     # -- transport ------------------------------------------------------------
 
     def request(
@@ -184,6 +191,8 @@ class HeroShotsClient:
         headers: dict[str, str] = {}
         if auth and self.token:
             headers["Authorization"] = f"Bearer {self.token}"
+        if auth and self.managed_user_id is not None:
+            headers["X-Managed-User-Id"] = str(self.managed_user_id)
 
         resp = self.session.request(
             method.upper(),

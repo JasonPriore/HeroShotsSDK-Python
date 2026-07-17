@@ -52,6 +52,36 @@ def test_v1_envelope_is_unwrapped():
 
 
 @responses.activate
+def test_managed_user_header_is_sent_for_act_as():
+    responses.post(
+        f"{BASE}/api/v1/image/generate",
+        json={"success": True, "data": {"generation_id": "g1", "status": "pending"}},
+        status=200,
+    )
+    client = HeroShotsClient(BASE, token="agency-key", managed_user_id=12345, auto_relogin=False)
+    out = client.images.generate(product_image_url="https://x/p.jpg")
+    assert out["generation_id"] == "g1"
+    assert responses.calls[-1].request.headers["Authorization"] == "Bearer agency-key"
+    assert responses.calls[-1].request.headers["X-Managed-User-Id"] == "12345"
+
+
+@responses.activate
+def test_managed_user_header_is_absent_by_default_and_with_auth_disabled():
+    responses.post(
+        f"{BASE}/api/v1/image/generate",
+        json={"success": True, "data": {"generation_id": "g1", "status": "pending"}},
+        status=200,
+    )
+    client = make_client()
+    client.images.generate(product_image_url="https://x/p.jpg")
+    assert "X-Managed-User-Id" not in responses.calls[-1].request.headers
+
+    responses.post(f"{BASE}/api/auth/login", json={"token": "fresh"}, status=200)
+    client.with_managed_user(12345).login("a@b.com", "pw")
+    assert "X-Managed-User-Id" not in responses.calls[-1].request.headers
+
+
+@responses.activate
 def test_portal_response_is_bare():
     responses.get(
         f"{BASE}/api/auth/stats",

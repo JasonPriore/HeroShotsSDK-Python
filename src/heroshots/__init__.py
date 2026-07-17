@@ -1,4 +1,4 @@
-"""HeroShots SDK - high-level Python client for the StudioHero platform (JWT auth)."""
+"""HeroShots SDK - high-level Python client for the StudioHero platform (JWT/API key auth)."""
 
 from __future__ import annotations
 

@@ -1,7 +1,8 @@
 # heroshots (Python SDK)
 
 High-level Python client for the HeroShots / StudioHero platform, authenticated
-with a **portal JWT**. Covers the full JWT-reachable API surface.
+with a **portal JWT or API key**. Covers the full JWT/API-key reachable API
+surface.
 
 ## Install
 
@@ -23,6 +24,22 @@ client = Client.from_login("dev@partner.com", "secret")
 
 # Or reuse an existing token.
 client = Client(token="eyJ...")
+```
+
+## Agency act-as
+
+Agency API keys can operate as a managed brand by passing the `managed_user_id`
+returned by the managed-client provisioning API. The SDK adds
+`X-Managed-User-Id` to authenticated requests.
+
+```python
+from heroshots import Client
+
+client = Client(token="lz_live_YOUR_AGENCY_KEY", managed_user_id=12345)
+job = client.images.generate(product_image_url="https://example.com/product.jpg")
+
+# Switch target brand later, or pass None to clear it.
+client.with_managed_user(67890)
 ```
 
 ## Usage
