@@ -22,7 +22,7 @@ from .errors import (
 )
 from ._polling import TimeoutError as PollTimeoutError
 
-__version__ = "0.2.5"
+__version__ = "0.3.0"
 
 # Friendly alias.
 Client = HeroShotsClient

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "heroshots"
-version = "0.2.5"
+version = "0.3.0"
 description = "Official Python SDK for the HeroShots / StudioHero platform (JWT/API key auth)."
 readme = "README.md"
 requires-python = ">=3.9"
