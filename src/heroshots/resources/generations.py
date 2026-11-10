@@ -39,7 +39,8 @@ class Generations(Resource):
         return self._get("/api/v1/generations", params=query or None)
 
     def iterate(self, *, per_page: int = 50, **filters: Any) -> Iterator[dict[str, Any]]:
-        """Yield every generation across all pages."""
+        """Yield every generation across all pages (``page`` in filters is ignored)."""
+        filters.pop("page", None)
         page = 1
         while True:
             resp = self.list(page=page, per_page=per_page, **filters)
