@@ -1,13 +1,13 @@
 # heroshots (Python SDK)
 
-High-level Python client for the HeroShots / StudioHero platform, authenticated
-with a **portal JWT or API key**. Covers the full JWT/API-key reachable API
-surface.
+Python client for the HeroShots / StudioHero API. Works with a **B2B API key**
+(`lz_live_...`) or a **portal login (JWT)** and covers the whole public
+`/api/v1` surface plus the StudioHero storyboard flow.
 
 ## Install
 
 ```bash
-pip install heroshots          # from a registry
+pip install heroshots          # from PyPI
 pip install -e ".[dev]"        # local dev (runs the test suite)
 ```
 
@@ -18,94 +18,112 @@ Requires Python 3.9+. Only runtime dependency: `requests`.
 ```python
 from heroshots import Client
 
-# Email/password login (recommended): stores the JWT, auto re-logins on expiry.
-# Base URL defaults to https://app.heroshots.ai.
+# API key (server-to-server). Also read from HEROSHOTS_API_KEY.
+client = Client(api_key="lz_live_...")
+
+# Portal login: stores the JWT and logs in again automatically when it expires.
 client = Client.from_login("dev@partner.com", "secret")
-
-# Or reuse an existing token.
-client = Client(token="eyJ...")
 ```
 
-## Agency act-as
+Base URL defaults to `https://app.heroshots.ai` (override with `base_url=` or
+`HEROSHOTS_BASE_URL`).
 
-Agency API keys can operate as a managed brand by passing the `managed_user_id`
-returned by the managed-client provisioning API. The SDK adds
-`X-Managed-User-Id` to authenticated requests.
+| Endpoints | API key | Portal JWT |
+|---|---|---|
+| `/api/v1/*`: images, videos, long video, still life, avatars, bulk, library, generations, pricing, agency, brand | ✅ | ✅ |
+| Storyboard (StudioHero), uploads, image candidates, still-life background edits, BYO legal documents | ❌ | ✅ |
+
+- API keys are **refused on the Free plan** (`ForbiddenError`, code
+  `plan_not_allowed`), except for agency accounts.
+- **Local file paths** are uploaded automatically only with a portal JWT. With
+  an API key pass public `https://` URLs (the SDK raises a clear error otherwise).
+
+## Quick start
 
 ```python
-from heroshots import Client
+client = Client(api_key="lz_live_...")
 
-client = Client(token="lz_live_YOUR_AGENCY_KEY", managed_user_id=12345)
-job = client.images.generate(product_image_url="https://example.com/product.jpg")
+print(client.balance())                       # {'hs_credits': 10, 'wallet_balance': 50.0, ...}
+print(client.pricing.quote("video", duration_seconds=15))
 
-# Switch target brand later, or pass None to clear it.
-client.with_managed_user(67890)
+job = client.videos.generate(
+    product_image_url="https://example.com/product.jpg",
+    avatar_id=42,
+    custom_prompt="slow dolly-in, soft studio light",
+    duration_seconds=15,
+)
+done = client.videos.wait(job.get("task_id") or job.get("video_id"))
+print(done["video_url"])
 ```
 
-## Usage
-
-```python
-# Local file paths are auto-uploaded to hosted URLs.
-briefs = client.storyboard.brief_suggestions(
-    product_image_url="product.jpg", subject_image_url="model.jpg",
-    duration_seconds=30, language_code="it",
-)
-
-candidates = client.storyboard.candidates(
-    custom_prompt=briefs[0], duration_seconds=30,
-    product_image_url="product.jpg", subject_image_url="model.jpg",
-)
-
-job = client.storyboard.generate(
-    custom_prompt=briefs[0], duration_seconds=30, selected_candidate=candidates[0],
-    product_image_url="product.jpg", subject_image_url="model.jpg",
-)
-sb = client.storyboard.wait(job["job_id"])           # polls until done/failed
-
-vjob = client.longvideo.start(image_url="product.jpg", storyboard=sb["storyboard"])
-final = client.longvideo.wait(vjob["job_id"])
-print(final["final_video_url"])                       # also: final.final_video_url
-```
-
-Responses support both `result["key"]` and `result.key` access. `/api/v1`
-billing metadata is under `result["_meta"]`.
-
-## Guide
-
-For step-by-step examples organized by use case, read the full guide:
-[GUIDE.md](https://github.com/JasonPriore/HeroShotsSDK-Python/blob/main/GUIDE.md).
+Responses support both `result["key"]` and `result.key`. `/api/v1` billing
+metadata (charges, credits left) is under `result["_meta"]`.
 
 ## Resources
 
-`uploads` · `images` · `videos` · `longvideo` · `stilllife` · `storyboard` ·
-`avatars`
+| Namespace | What it does |
+|---|---|
+| `client.account` | `me()`, `health()` |
+| `client.images` | `generate`, `status`, `wait`, `download`, `generate_background`, `usage_rights_quote`, `usage_rights_upgrade`, `analyze_edit_region`, `candidates`, `select_candidate` |
+| `client.videos` | `generate`, `status`, `wait`, `download` |
+| `client.longvideo` | `start`, `status`, `wait`, `regenerate_segment`, `view` |
+| `client.stilllife` | `start`, `status`, `wait`, `preview_background`, `change_background`, `change_background_status` |
+| `client.storyboard` | `brief_suggestions`, `candidates`, `generate`, `frames`, `revise`, `status`, `wait`, `subject_measurements`, `analyze_product`, `creativity` |
+| `client.avatars` | `list`, `get`, `generate`, `create_from_steps`, `update`, `delete`, `upload_view`, `regenerate_view`, `regenerate_variants`, `generated_version`, `set_image_set`, `generate_sheet`, `generate_voice`, `resolve_outfit_link`, `change_outfit`, `restore_outfit`, `improve_prompt`, `analyze_attributes`, `consent_document` |
+| `client.bulk` | `list`, `create`, `get`, `update`, `delete`, `upload_images`, `start`, `wait`, `regenerate_item`, `regenerate_all`, `cancel_item`, `remove_item`, `replace_product`, `previews`, `attempts`, `select_attempt`, `download_item`, `download_product`, `download_generated` |
+| `client.generations` | `list`, `iterate` |
+| `client.pricing` | `catalog`, `quote`, `video_packages_catalog`, `video_packages_quote`, `usage_rights_rules` |
+| `client.assets` · `client.collections` · `client.backgrounds` · `client.categories` | product library (CRUD) |
+| `client.uploads` | `image`, `consent_document`, `reference_audio` |
+| `client.legal` | `byo_status`, `manleva_template`, `liberatoria_template`, `upload_manleva`, `attach_liberatoria` |
+| `client.agency` | managed brands: `clients`, `client`, `invite_client`, `create_client`, `update_client`, `topup`, `resend_invite`, `claim_invite`, termination |
+| `client.brand` | the brand side of an agency relationship |
 
-Plus on the client: `login()`, `me()`, `balance()`, `stats()`.
+On the client: `login()`, `me()`, `balance()`, `stats()`, `with_managed_user()`,
+`download()`, `request()`.
 
-Every method maps 1:1 to an endpoint; pass extra backend fields as keyword
-arguments (they are forwarded verbatim).
+Every method maps 1:1 to an endpoint; extra backend fields can be passed as
+keyword arguments and are forwarded verbatim.
+
+## Agency act-as
+
+```python
+client = Client(api_key="lz_live_AGENCY_KEY", managed_user_id=12345)
+client.images.generate("https://example.com/product.jpg", avatar_id=7)
+client.with_managed_user(67890)   # switch brand; None clears it
+```
+
+## Downloads
+
+```python
+data = client.images.download(log_id)                 # bytes
+path = client.videos.download(log_id, "out/spot.mp4")  # saved to disk
+zip_path = client.bulk.download_generated(bulk_id, "out/bulk.zip")
+```
 
 ## Errors
 
 ```python
-from heroshots import ValidationError, TokenExpiredError, RateLimitError
+from heroshots import BillingError, ForbiddenError, RateLimitError, ValidationError
 
 try:
-    client.storyboard.candidates(custom_prompt="", duration_seconds=30,
-                                 product_image_url="p.jpg")
-except ValidationError as e:
-    print(e.code, e.message, e.details)
+    client.videos.generate(image_url="https://example.com/p.jpg", duration_seconds=15)
+except BillingError as e:          # no payment method / billing details (VAT) missing
+    print(e.code, e.message)
+except RateLimitError as e:        # already retried max_retries times
+    print("retry after", e.retry_after)
 ```
+
+HTTP 429 is retried automatically (`max_retries=2`, honours `Retry-After`).
+
+## Guide
+
+Step-by-step examples by use case (Italian):
+[GUIDE.md](https://github.com/JasonPriore/HeroShotsSDK-Python/blob/main/GUIDE.md).
+Changes per version: [CHANGELOG.md](./CHANGELOG.md).
 
 ## Test
 
 ```bash
 pytest          # offline, mocked HTTP
 ```
-
-## Billing
-
-Generations cost credits. Check remaining credits with `client.balance()`
-(`hs_credits` + `wallet_balance`). Use `client.stats()` for the full raw
-`/api/auth/stats` payload, including recent generations and offered plans. See
-`examples/full_storyboard_flow.py`.

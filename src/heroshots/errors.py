@@ -84,7 +84,17 @@ class ServiceUnavailableError(ApiError):
 
 
 class RateLimitError(ApiError):
-    """HTTP 429 - too many requests. Back off and retry."""
+    """HTTP 429 - too many requests. ``retry_after`` holds the server hint in seconds."""
+
+    retry_after: Optional[float] = None
+
+
+class BillingError(ApiError):
+    """The charge could not be made: no payment method, or billing/VAT data missing.
+
+    ``wallet_vat_validation_required`` means the account must complete its billing
+    details (VAT number + VIES check, or the private-person flag) in the portal.
+    """
 
 
 class InternalError(ApiError):
@@ -106,15 +116,18 @@ _CODE_MAP: dict[str, type[ApiError]] = {
     "not_found": NotFoundError,
     "resource_gone": NotFoundError,
     "forbidden": ForbiddenError,
-    "plan_not_allowed": ForbiddenError,
+    "plan_not_allowed": ForbiddenError,  # e.g. API keys are not allowed on the Free plan
     "insufficient_scope": ForbiddenError,
     "conflict": ConflictError,
+    "plan_change_locked": ConflictError,
     "quota_exceeded": QuotaExceededError,
     "payload_too_large": PayloadTooLargeError,
     "provider_error": ProviderError,
     "service_unavailable": ServiceUnavailableError,
     "pricing_not_configured": ServiceUnavailableError,
     "stripe_not_configured": ServiceUnavailableError,
+    "no_payment_method": BillingError,
+    "wallet_vat_validation_required": BillingError,
     "internal_error": InternalError,
 }
 

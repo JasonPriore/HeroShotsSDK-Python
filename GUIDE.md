@@ -4,19 +4,24 @@ Guida operativa all'SDK Python (`heroshots`), organizzata per **caso d'uso**. Og
 sezione ha codice commentato passo-passo e un **esempio di risultato** (l'output
 che ti aspetti). Per le firme complete dei metodi vedi il [README](./README.md).
 
-L'SDK copre esattamente queste capacità:
+L'SDK copre tutta l'API pubblica `/api/v1` più il flusso StudioHero:
 
 | Caso d'uso | Risorsa |
 |---|---|
-| Foto (immagine prodotto, anche still-life) | `images` |
+| Foto (immagine prodotto, anche still-life), sfondi AI, diritti d'uso | `images` |
 | Video corto | `videos` |
-| Video lungo (multi-segmento) | `longvideo` |
+| Video lungo (multi-segmento), rigenerare un segmento | `longvideo` |
 | Still-life video | `stilllife` |
 | Studio Hero (storyboard, tutte le fasi) | `storyboard` + `longvideo` |
-| Avatar: vedere i propri + default, generarne | `avatars` |
-| Consultare il balance | `client.balance()` |
-| Consultare stats account complete | `client.stats()` |
-| Caricare file → URL ospitato (usato da tutto) | `uploads` |
+| Avatar: lista, creazione, modifica, outfit, voce, avatar sheet | `avatars` |
+| Generazione in serie (bulk) | `bulk` |
+| Storico generazioni e download dei file | `generations`, `images.download`, `videos.download` |
+| Listino e preventivi | `pricing` |
+| Libreria: prodotti, collezioni, sfondi, categorie | `assets`, `collections`, `backgrounds`, `categories` |
+| Liberatorie per avatar di persone reali (BYO) | `legal` + `uploads.consent_document` |
+| Agenzie: brand gestiti | `agency` (+ `brand` lato brand) |
+| Balance e account | `client.balance()`, `client.me()`, `client.stats()` |
+| Caricare file → URL ospitato | `uploads` |
 
 ---
 
@@ -30,6 +35,12 @@ L'SDK copre esattamente queste capacità:
 - [5. Video lungo](#5-video-lungo)
 - [6. Studio Hero — tutte le fasi](#6-studio-hero--tutte-le-fasi)
 - [7. Avatar](#7-avatar)
+- [8. Listino e preventivi](#8-listino-e-preventivi)
+- [9. Storico e download](#9-storico-e-download)
+- [10. Generazione in serie (bulk)](#10-generazione-in-serie-bulk)
+- [11. Libreria](#11-libreria)
+- [12. Avatar di persone reali (BYO)](#12-avatar-di-persone-reali-byo)
+- [13. Agenzie: brand gestiti](#13-agenzie-brand-gestiti)
 - [Gestione errori](#gestione-errori)
 
 ---
@@ -39,18 +50,32 @@ L'SDK copre esattamente queste capacità:
 ```python
 from heroshots import Client
 
-# Login con email/password: salva il JWT e fa auto re-login alla scadenza (7 giorni).
-# Il base URL è https://app.heroshots.ai (default, non serve passarlo).
+# A) API key (server-to-server). Si può anche mettere in HEROSHOTS_API_KEY.
+client = Client(api_key="lz_live_...")
+
+# B) Login con email/password: salva il JWT e rifà il login alla scadenza (7 giorni).
 client = Client.from_login("dev@partner.com", "secret")
+# Il base URL è https://app.heroshots.ai (default, non serve passarlo).
 ```
 
-Tre concetti validi per tutto l'SDK:
+**Quale credenziale usare.** Tutti gli endpoint `/api/v1` (foto, video, video
+lunghi, still-life, avatar, bulk, libreria, storico, listino, agenzie) accettano
+sia l'API key sia il JWT. Storyboard, upload di file, candidati immagine, cambio
+sfondo dello still-life e documenti legali accettano **solo il JWT** del login.
+Sul **piano Free le API key sono rifiutate** (`ForbiddenError`, codice
+`plan_not_allowed`), tranne per le agenzie.
 
-1. **Upload automatico.** Ovunque si passi un'immagine puoi dare un **path locale**:
-   l'SDK lo carica e usa l'URL ospitato. Gli URL `http(s)` passano invariati.
-2. **Job asincroni.** Le generazioni ritornano un `job_id`/`task_id`; chiama
-   `wait(...)` per attendere il completamento (gestisce gli stati terminali).
-3. **Costo.** Ogni generazione consuma crediti: controlla con `client.balance()`.
+Quattro concetti validi per tutto l'SDK:
+
+1. **Upload automatico (solo con login).** Ovunque si passi un'immagine puoi dare
+   un **path locale**: l'SDK lo carica e usa l'URL ospitato. Gli URL `http(s)`
+   passano invariati. Con l'API key l'upload non è permesso: passa URL pubblici.
+2. **Job asincroni.** Le generazioni ritornano un `job_id`/`task_id`/`generation_id`;
+   chiama `wait(...)` per attendere il completamento (gestisce gli stati terminali).
+3. **Costo.** Ogni generazione consuma crediti: controlla con `client.balance()`,
+   chiedi il prezzo prima con `client.pricing.quote(...)`.
+4. **Troppe richieste.** Le risposte 429 vengono ritentate da sole (2 volte,
+   rispettando `Retry-After`).
 
 > Le risposte permettono sia `res["chiave"]` sia `res.chiave`. I metadati di
 > billing degli endpoint `/api/v1` sono sotto `res["_meta"]`.
@@ -97,12 +122,12 @@ generazione. Lo stato della relazione e gli scope vengono validati dall'API.
 Consulta i crediti residui prima di generare.
 
 ```python
-bal = client.balance()   # vista compatta di GET /api/auth/stats
+bal = client.balance()   # API key: GET /api/v1/me · login: GET /api/auth/stats
 
 print("HS credits:", bal["hs_credits"])
 print("Wallet:", bal["wallet_balance"], "€")
 
-# Se vuoi la risposta completa dell'endpoint (recent_generations, piani, flag):
+# Solo con login: la risposta completa (recent_generations, piani, flag):
 stats = client.stats()
 ```
 
@@ -163,7 +188,7 @@ v = client.videos.generate(
     resolution="1080p",
 )
 
-done = client.videos.wait(v["task_id"])   # attende succeeded/failed
+done = client.videos.wait(v.get("task_id") or v.get("video_id"))   # succeeded/failed
 print(done["video_url"])
 ```
 
@@ -189,7 +214,7 @@ task = client.stilllife.start(
 done = client.stilllife.wait(task["task_id"])
 print(done.get("video_url"))
 
-# (Opzionale) prova e applica un nuovo sfondo:
+# (Opzionale, solo con login) prova e applica un nuovo sfondo:
 client.stilllife.change_background(task["task_id"], background_url="bg2.jpg")
 ```
 
@@ -208,14 +233,17 @@ da uno storyboard di Studio Hero (vedi §6).
 ```python
 job = client.longvideo.start(
     image_url="product.jpg",
-    custom_prompt="15s ad, three beats: reveal, detail, logo",
+    custom_prompt="30s ad, three beats: reveal, detail, logo",
     ratio="16:9",
     resolution="1080p",
-    duration_seconds=15,
+    duration_seconds=30,          # 30, 45 o 60
 )
 
 final = client.longvideo.wait(job["job_id"])   # success = "done"
 print(final["final_video_url"])
+
+# Rifare un solo segmento (e, con cascade=True, quelli dopo):
+client.longvideo.regenerate_segment(job["job_id"], 1, comment="più lento", cascade=True)
 ```
 
 **Esempio di risultato (`final`):**
@@ -341,32 +369,133 @@ Fase 6 — `final` → vedi [§5](#5-video-lungo) (`final_video_url`).
 
 ## 7. Avatar
 
-Elenca i tuoi avatar e quelli di default, e richiedi la generazione di uno nuovo.
-
 ```python
-# Lista (tuoi + default).
-data = client.avatars.list()
+# Lista (tuoi + default), con filtri.
+data = client.avatars.list(gender="female", per_page=20)
 for a in data["avatars"]:
-    print(a["id"], a["name"], f"({a['kind']})")
+    print(a["id"], a["name"])
 
-# Dettaglio singolo.
 one = client.avatars.get(42)
 
-# Richiesta generazione nuovo avatar.
+# Nuovo avatar AI.
 gen = client.avatars.generate(
+    "Aria",
+    generate_with_ai=True,
     prompt="donna 30 anni, capelli scuri, sguardo deciso",
     gender="female",
 )
+
+# Modifiche.
+client.avatars.update(42, name="Aria 2", age=31)
+client.avatars.set_image_set(42, "generated")          # usa le foto generate
+client.avatars.regenerate_view(42, "closeup")          # rifà una vista (async)
+client.avatars.generate_voice(42, generation_note="voce calda, italiana")
+
+# Outfit (slot: hat, top, belt, pants, shoes, accessories), max 6 capi.
+found = client.avatars.resolve_outfit_link("https://shop.example.com/giacca")
+client.avatars.change_outfit(42, items=[
+    {"slot": "top", "image_url": found["image_urls"][0], "title": found.get("title")},
+    {"slot": "shoes", "link_url": "https://shop.example.com/sneakers"},
+    {"slot": "hat", "description": "berretto di lana nero"},
+])
+client.avatars.restore_outfit(42)                      # annulla l'ultimo cambio
 ```
 
 **Esempio di risultato (`data`):**
 ```json
 {
   "avatars": [
-    { "id": 42, "name": "Aria",  "kind": "owned",   "image_url": "https://cdn/.../42.png" },
-    { "id": 7,  "name": "Default Male 01", "kind": "default", "image_url": "https://cdn/.../d7.png" }
-  ]
+    { "id": 42, "name": "Aria", "image_url": "https://cdn/.../42.png" },
+    { "id": 7,  "name": "Default Male 01", "is_default": true, "image_url": "https://cdn/.../d7.png" }
+  ],
+  "total": 2, "page": 1, "pages": 1
 }
+```
+
+---
+
+## 8. Listino e preventivi
+
+```python
+catalog = client.pricing.catalog()                         # prezzi del tuo piano
+q = client.pricing.quote("video", duration_seconds=30)      # costo prima di generare
+pk = client.pricing.video_packages_quote("growth")          # pacchetti video
+```
+
+---
+
+## 9. Storico e download
+
+```python
+page = client.generations.list(type="video", per_page=20)
+for g in client.generations.iterate(type="image"):          # tutte le pagine
+    print(g["id"])
+
+client.images.download(1234, "out/foto.jpg")    # stesso watermark/risoluzione della generazione
+client.videos.download(1235, "out/spot.mp4")
+raw = client.images.download(1234)              # senza dest: ritorna i bytes
+```
+
+---
+
+## 10. Generazione in serie (bulk)
+
+```python
+bulk = client.bulk.create(prompt="modella in studio, luce morbida", avatar_id=42)
+client.bulk.upload_images(bulk["id"], ["p1.jpg", "p2.jpg", "p3.jpg"])
+client.bulk.start(bulk["id"])
+final = client.bulk.wait(bulk["id"])            # completed / partially_completed / failed
+client.bulk.download_generated(bulk["id"], "out/bulk.zip")
+```
+
+---
+
+## 11. Libreria
+
+```python
+asset = client.assets.create("Borsa Milano", "borsa.jpg", category_id=3)
+client.assets.add_image(asset["id"], "borsa_retro.jpg")
+
+col = client.collections.create("Primavera 2027")
+client.collections.add_generation(col["id"], 1234)
+
+client.backgrounds.create(image_url="https://example.com/bg.jpg", name="Spiaggia")
+cats = client.categories.list()
+```
+
+---
+
+## 12. Avatar di persone reali (BYO)
+
+Solo con login. Il brand firma una volta la manleva; per ogni persona servono
+liberatoria firmata e documento d'identità.
+
+```python
+status = client.legal.byo_status()                       # can_create_byo, ...
+client.legal.manleva_template("manleva.docx")
+client.legal.liberatoria_template("liberatoria.docx")
+
+release = client.uploads.consent_document("liberatoria_firmata.pdf")["public_url"]
+id_doc = client.uploads.consent_document("carta_identita.jpg")["public_url"]
+
+client.legal.attach_liberatoria(
+    tenant_id, avatar_id,
+    release_doc_url=release, id_doc_url=id_doc,
+    model_email="model@example.com", model_dob="1995-04-12",
+)
+```
+
+---
+
+## 13. Agenzie: brand gestiti
+
+```python
+client = Client(api_key="lz_live_AGENCY_KEY")
+clients = client.agency.clients()["clients"]
+rel = client.agency.invite_client("brand@example.com")
+client.agency.topup(rel["id"], 50.0)                     # EUR dal wallet agenzia
+
+# Generare come il brand: vedi §0.1 (managed_user_id).
 ```
 
 ---
@@ -391,9 +520,10 @@ except ValidationError as e:
 |---|---|
 | `ValidationError` | payload non valido |
 | `AuthError` / `TokenExpiredError` | token mancante/non valido/scaduto |
-| `ForbiddenError` | piano/permessi non sufficienti |
+| `ForbiddenError` | piano/permessi non sufficienti (es. API key sul piano Free) |
 | `NotFoundError` | risorsa o job inesistente/scaduto |
 | `QuotaExceededError` | crediti/quota esauriti |
+| `BillingError` | nessun metodo di pagamento o dati di fatturazione/IVA mancanti |
 | `ProviderError` | generazione fallita (anche job falliti) |
-| `RateLimitError` | troppe richieste (429) |
+| `RateLimitError` | troppe richieste (429), dopo i tentativi automatici; `retry_after` in secondi |
 | `ServiceUnavailableError` / `InternalError` | problemi lato server |

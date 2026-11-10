@@ -151,9 +151,11 @@ def test_404_maps_to_not_found():
 
 @responses.activate
 def test_429_maps_to_rate_limit():
-    responses.get(f"{BASE}/api/auth/stats", body="too many", status=429)
-    with pytest.raises(RateLimitError):
-        make_client().balance()
+    responses.get(f"{BASE}/api/auth/stats", body="too many", status=429, headers={"Retry-After": "7"})
+    client = HeroShotsClient(BASE, token="tok", auto_relogin=False, max_retries=0)
+    with pytest.raises(RateLimitError) as exc:
+        client.balance()
+    assert exc.value.retry_after == 7.0
 
 
 @responses.activate

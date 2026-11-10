@@ -61,7 +61,7 @@ def test_storyboard_wait_succeeds_on_done():
 @responses.activate
 def test_wait_raises_provider_error_on_failed():
     responses.get(
-        f"{BASE}/api/auth/long-video/status/9",
+        f"{BASE}/api/v1/long-video/status/9",
         json={"job_id": 9, "status": "failed", "error": {"code": "provider_error", "message": "boom"}},
         status=200,
     )
@@ -73,8 +73,8 @@ def test_wait_raises_provider_error_on_failed():
 @responses.activate
 def test_video_wait_uses_succeeded_terminal():
     responses.get(
-        f"{BASE}/video/status/t1",
-        json={"task_id": "t1", "status": "succeeded", "video_url": "https://cdn/v.mp4"},
+        f"{BASE}/api/v1/video/status/t1",
+        json={"success": True, "data": {"status": "succeeded", "video_url": "https://cdn/v.mp4"}},
         status=200,
     )
     out = make_client().videos.wait("t1", interval=0, timeout=5)

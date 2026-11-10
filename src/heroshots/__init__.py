@@ -1,4 +1,4 @@
-"""HeroShots SDK - high-level Python client for the StudioHero platform (JWT/API key auth)."""
+"""HeroShots SDK - Python client for the HeroShots / StudioHero API (API key or portal JWT)."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from .client import HeroShotsClient
 from .errors import (
     ApiError,
     AuthError,
+    BillingError,
     ConflictError,
     ForbiddenError,
     HeroShotsError,
@@ -32,6 +33,7 @@ __all__ = [
     "HeroShotsError",
     "ApiError",
     "AuthError",
+    "BillingError",
     "TokenExpiredError",
     "ValidationError",
     "NotFoundError",
