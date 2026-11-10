@@ -98,15 +98,16 @@ client = Client(
 )
 
 # Da qui in poi le generazioni vengono eseguite come quel brand.
+# Con l'API key passa URL pubblici (l'upload di file locali richiede il login).
 gen = client.images.generate(
-    product_image_url="product.jpg",
+    product_image_url="https://example.com/product.jpg",
     still_life=True,
-    ratio="1:1",
+    aspect_ratio="1:1",
 )
 
 # Per passare a un altro brand gestito senza ricreare il client:
 client.with_managed_user(67890)
-v = client.videos.generate("product.jpg", custom_prompt="slow dolly-in")
+v = client.videos.generate("https://example.com/product.jpg", custom_prompt="slow dolly-in")
 
 # Per tornare a chiamate senza act-as:
 client.with_managed_user(None)

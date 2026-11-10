@@ -120,10 +120,16 @@ class Bulk(Resource):
         bulk_id: BulkId,
         dest: Dest = None,
         *,
-        item_ids: Optional[Iterable[BulkId]] = None,
+        item_ids: Optional[Union[str, Iterable[BulkId]]] = None,
     ) -> Union[bytes, str]:
-        """GET /api/v1/bulk/<id>/download-generated -> zip of generated images."""
-        params = {"item_ids": ",".join(str(i) for i in item_ids)} if item_ids else None
+        """GET /api/v1/bulk/<id>/download-generated -> zip of generated images.
+
+        ``item_ids`` limits the zip to some items (list, or ``"1,2"`` string).
+        """
+        if isinstance(item_ids, str):
+            params = {"item_ids": item_ids} if item_ids else None
+        else:
+            params = {"item_ids": ",".join(str(i) for i in item_ids)} if item_ids else None
         return self._client.download(f"/api/v1/bulk/{bulk_id}/download-generated", dest, params=params)
 
     def wait(

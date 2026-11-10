@@ -249,3 +249,10 @@ def test_legal_templates_download_and_attach():
     client.legal.attach_liberatoria(10, 3, release_doc_url="r", id_doc_url="i",
                                     model_email="m@x.com", model_dob="1990-01-01")
     assert last_json()["avatar_id"] == 3
+
+
+@responses.activate
+def test_bulk_download_generated_accepts_string_ids():
+    responses.get(f"{BASE}/api/v1/bulk/b1/download-generated", body=b"PK")
+    api_client().bulk.download_generated("b1", item_ids="3,4")
+    assert responses.calls[-1].request.url.endswith("item_ids=3%2C4")
