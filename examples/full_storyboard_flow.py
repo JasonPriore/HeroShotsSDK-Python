@@ -68,7 +68,7 @@ def main(product_path: str, model_path: str) -> None:
 
     # 7. Long video render.
     vjob = client.longvideo.start(image_url=product_url, storyboard=storyboard, ratio="16:9")
-    result = client.longvideo.wait(vjob["job_id"])
+    result = client.longvideo.render(vjob["job_id"])  # wait for clips, export, final cut
     print("FINAL VIDEO:", result.get("final_video_url"))
 
 

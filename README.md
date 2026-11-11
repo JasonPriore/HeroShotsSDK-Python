@@ -31,7 +31,7 @@ Base URL defaults to `https://app.heroshots.ai` (override with `base_url=` or
 | Endpoints | API key | Portal JWT |
 |---|---|---|
 | `/api/v1/*`: images, videos, long video, still life, avatars, bulk, library, generations, pricing, agency, brand | ✅ | ✅ |
-| Storyboard (StudioHero), uploads, image candidates, still-life background edits, BYO legal documents | ❌ | ✅ |
+| Storyboard (StudioHero), uploads, image candidates, long-video export (final cut), still-life background edits, BYO legal documents | ❌ | ✅ |
 
 - API keys are **refused on the Free plan** (`ForbiddenError`, code
   `plan_not_allowed`), except for agency accounts.
@@ -52,7 +52,7 @@ job = client.videos.generate(
     custom_prompt="slow dolly-in, soft studio light",
     duration_seconds=15,
 )
-done = client.videos.wait(job.get("task_id") or job.get("video_id"))
+done = client.videos.wait(job["video_id"])
 print(done["video_url"])
 ```
 
@@ -66,7 +66,7 @@ metadata (charges, credits left) is under `result["_meta"]`.
 | `client.account` | `me()`, `health()` |
 | `client.images` | `generate`, `status`, `wait`, `download`, `generate_background`, `usage_rights_quote`, `usage_rights_upgrade`, `analyze_edit_region`, `candidates`, `select_candidate` |
 | `client.videos` | `generate`, `status`, `wait`, `download` |
-| `client.longvideo` | `start`, `status`, `wait`, `regenerate_segment`, `view` |
+| `client.longvideo` | `start`, `status`, `wait` (until `segments_ready`), `regenerate_segment`, `export`, `render` (final cut, portal JWT), `view` |
 | `client.stilllife` | `start`, `status`, `wait`, `preview_background`, `change_background`, `change_background_status` |
 | `client.storyboard` | `brief_suggestions`, `candidates`, `generate`, `frames`, `revise`, `status`, `wait`, `subject_measurements`, `analyze_product`, `creativity` |
 | `client.avatars` | `list`, `get`, `generate`, `create_from_steps`, `update`, `delete`, `upload_view`, `regenerate_view`, `regenerate_variants`, `generated_version`, `set_image_set`, `generate_sheet`, `generate_voice`, `resolve_outfit_link`, `change_outfit`, `restore_outfit`, `improve_prompt`, `analyze_attributes`, `consent_document` |

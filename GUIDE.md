@@ -153,26 +153,34 @@ soggetto) passa `still_life=True` e ometti il soggetto.
 # Con soggetto (path locali caricati in automatico).
 gen = client.images.generate(
     product_image_url="product.jpg",
-    subject_image_url="model.jpg",
-    ratio="4:5",
+    subject_image_url="model.jpg",      # oppure avatar_id=42
+    aspect_ratio="3:4",                 # 1:1 16:9 4:3 3:4 9:16 3:2 2:3 21:9
+    size="2K",                          # 720p 1080p 2K 4K
 )
+print(gen["url"])                        # la chiamata attende l'immagine finita
 
 # Oppure still-life (solo prodotto):
-gen = client.images.generate("product.jpg", still_life=True, ratio="1:1")
+gen = client.images.generate("product.jpg", still_life=True, aspect_ratio="1:1")
 
-# Attende il completamento e legge l'immagine.
-done = client.images.wait(gen["generation_id"])
-print(done["images"][0]["url"])
+# Per non tenere aperta la richiesta: async_generation=True, poi wait().
+job = client.images.generate("product.jpg", avatar_id=42, async_generation=True)
+done = client.images.wait(job["generation_id"])     # status "done" o "failed"
+print(done["output_url"])
 ```
 
-**Esempio di risultato (`done`):**
+**Esempio di risultato (`gen`, chiamata normale):**
 ```json
 {
-  "generation_id": "img_9f2a",
-  "status": "succeeded",
-  "images": [{ "url": "https://cdn.heroshots.ai/out/img_9f2a_0.png", "width": 2048, "height": 2560 }],
-  "_meta": { "credits_remaining": { "hs_credits": 1232 } }
+  "url": "https://cdn.heroshots.ai/out/img_9f2a.png",
+  "generation_id": "gen_9f2a",
+  "_meta": { "credits_remaining": { "hs_credits": 1232, "currency_credit": 48.1 },
+             "charges": { "cost_charged": 0.39, "billing_operation": "image" } }
 }
+```
+
+**Esempio di risultato (`done`, dopo `wait`):**
+```json
+{ "status": "done", "generation_id": "gen_9f2a", "output_url": "https://cdn.heroshots.ai/out/img_9f2a.png", "error": null }
 ```
 
 ---
@@ -185,17 +193,22 @@ Animazione breve a partire da un'immagine.
 v = client.videos.generate(
     "product.jpg",
     custom_prompt="slow dolly-in, soft studio light",
+    duration_seconds=15,      # blocchi da 15 s
     ratio="16:9",
     resolution="1080p",
 )
 
-done = client.videos.wait(v.get("task_id") or v.get("video_id"))   # succeeded/failed
+done = client.videos.wait(v["video_id"])   # succeeded / failed
 print(done["video_url"])
 ```
 
+`generate()` torna appena il video è stato inviato al motore, con un
+`video_id`; `wait()` lo segue fino alla fine. Non passare `async_generation`:
+in quel caso l'API restituisce un `generation_id` che `videos.wait()` non segue.
+
 **Esempio di risultato (`done`):**
 ```json
-{ "task_id": "vid_5c1e", "status": "succeeded", "video_url": "https://cdn.heroshots.ai/out/vid_5c1e.mp4" }
+{ "task_id": "cgt-2026…", "status": "succeeded", "video_url": "https://cdn.heroshots.ai/out/vid_5c1e.mp4" }
 ```
 
 ---
@@ -212,8 +225,8 @@ task = client.stilllife.start(
     duration_seconds=5,
 )
 
-done = client.stilllife.wait(task["task_id"])
-print(done.get("video_url"))
+done = client.stilllife.wait(task["task_id"])      # status "done" o "failed"
+print(done["processed_video_url"])
 
 # (Opzionale, solo con login) prova e applica un nuovo sfondo:
 client.stilllife.change_background(task["task_id"], background_url="bg2.jpg")
@@ -221,7 +234,7 @@ client.stilllife.change_background(task["task_id"], background_url="bg2.jpg")
 
 **Esempio di risultato (`done`):**
 ```json
-{ "task_id": "sl_77b0", "status": "succeeded", "video_url": "https://cdn.heroshots.ai/out/sl_77b0.mp4" }
+{ "task_id": 77, "status": "done", "processed_video_url": "https://cdn.heroshots.ai/out/sl_77.mp4", "error": null }
 ```
 
 ---
@@ -240,12 +253,24 @@ job = client.longvideo.start(
     duration_seconds=30,          # 30, 45 o 60
 )
 
-final = client.longvideo.wait(job["job_id"])   # success = "done"
-print(final["final_video_url"])
+# Attende che tutti i segmenti siano pronti (status "segments_ready").
+ready = client.longvideo.wait(job["job_id"])
+for seg in ready["segments"]:
+    print(seg["index"], seg["video_url"])
 
 # Rifare un solo segmento (e, con cascade=True, quelli dopo):
 client.longvideo.regenerate_segment(job["job_id"], 1, comment="più lento", cascade=True)
+
+# Montaggio finale (solo con login): unisce i segmenti in final_video_url.
+final = client.longvideo.render(job["job_id"])     # = wait + export + attesa
+print(final["final_video_url"])
 ```
+
+Come nel portale, quando i segmenti sono pronti il job si ferma in
+`segments_ready`: puoi rivederli o rifarli, poi `export()` (o `render()`) crea il
+video unico. L'export non costa nulla. Con una **API key** l'export non è
+disponibile: usi i singoli `segments[].video_url`. I video con doppiaggio
+arrivano già a `done` con `final_video_url`.
 
 **Esempio di risultato (`final`):**
 ```json
@@ -313,7 +338,7 @@ storyboard = frames.get("storyboard") or storyboard
 
 # --- Fase 6: render video lungo dallo storyboard ---
 vjob = client.longvideo.start(image_url=product, storyboard=storyboard, ratio="16:9")
-final = client.longvideo.wait(vjob["job_id"])
+final = client.longvideo.render(vjob["job_id"])     # segmenti + montaggio finale
 print(final["final_video_url"])
 ```
 
@@ -428,13 +453,15 @@ pk = client.pricing.video_packages_quote("growth")          # pacchetti video
 ## 9. Storico e download
 
 ```python
-page = client.generations.list(type="video", per_page=20)
-for g in client.generations.iterate(type="image"):          # tutte le pagine
-    print(g["id"])
+page = client.generations.list(type="image", per_page=20)
+for g in client.generations.iterate(type="video"):          # tutte le pagine
+    print(g["id"], g["download_url"])
 
-client.images.download(1234, "out/foto.jpg")    # stesso watermark/risoluzione della generazione
-client.videos.download(1235, "out/spot.mp4")
-raw = client.images.download(1234)              # senza dest: ritorna i bytes
+# L'id da scaricare è quello dello storico (g["id"]), non il generation_id.
+log_id = page["generations"][0]["id"]
+client.images.download(log_id, "out/foto.jpg")  # stesso watermark/risoluzione della generazione
+raw = client.images.download(log_id)            # senza dest: ritorna i bytes
+client.videos.download(video_log_id, "out/spot.mp4")
 ```
 
 ---

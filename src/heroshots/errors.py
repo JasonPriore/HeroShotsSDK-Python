@@ -108,7 +108,9 @@ _CODE_MAP: dict[str, type[ApiError]] = {
     "missing_bearer_token": AuthError,
     "invalid_api_key": AuthError,
     "invalid_token": AuthError,
-    "invalid_or_expired_token": AuthError,
+    # Portal routes report an expired login this way: treat it as expired so the
+    # client logs in again once (a truly invalid token fails again and is raised).
+    "invalid_or_expired_token": TokenExpiredError,
     "unauthorized": AuthError,
     "user_not_found": AuthError,
     "token_expired": TokenExpiredError,

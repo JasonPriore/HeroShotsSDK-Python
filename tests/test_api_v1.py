@@ -256,3 +256,41 @@ def test_bulk_download_generated_accepts_string_ids():
     responses.get(f"{BASE}/api/v1/bulk/b1/download-generated", body=b"PK")
     api_client().bulk.download_generated("b1", item_ids="3,4")
     assert responses.calls[-1].request.url.endswith("item_ids=3%2C4")
+
+
+@responses.activate
+def test_longvideo_wait_stops_at_segments_ready():
+    responses.get(f"{BASE}/api/v1/long-video/status/5", json=ok({"job_id": 5, "status": "generating"}))
+    responses.get(f"{BASE}/api/v1/long-video/status/5",
+                  json=ok({"job_id": 5, "status": "segments_ready", "final_video_url": None,
+                           "segments": [{"index": 1, "video_url": "https://cdn/1.mp4"}]}))
+    out = api_client().longvideo.wait(5, interval=0, timeout=5)
+    assert out["status"] == "segments_ready"
+    assert out["segments"][0]["video_url"].endswith("1.mp4")
+
+
+@responses.activate
+def test_longvideo_render_exports_then_waits_for_final(monkeypatch):
+    monkeypatch.setattr("heroshots.resources.longvideo.time.sleep", lambda s: None)
+    responses.get(f"{BASE}/api/v1/long-video/status/5", json=ok({"status": "segments_ready"}))
+    responses.post(f"{BASE}/api/auth/long-video/5/export", json={"job_id": 5, "status": "concatenating"}, status=202)
+    responses.get(f"{BASE}/api/v1/long-video/status/5", json=ok({"status": "concatenating"}))
+    responses.get(f"{BASE}/api/v1/long-video/status/5",
+                  json=ok({"status": "done", "final_video_url": "https://cdn/final.mp4"}))
+    client = HeroShotsClient(BASE, token="jwt", auto_relogin=False)
+    out = client.longvideo.render(5, interval=0, timeout=5)
+    assert out["final_video_url"].endswith("final.mp4")
+    export_call = [c for c in responses.calls if c.request.url.endswith("/export")][0]
+    assert json.loads(export_call.request.body) == {}
+
+
+@responses.activate
+def test_invalid_or_expired_token_triggers_relogin():
+    responses.post(f"{BASE}/api/auth/long-video/5/export",
+                   json={"success": False, "error": {"code": "invalid_or_expired_token", "message": "x"}},
+                   status=401)
+    responses.post(f"{BASE}/api/auth/login", json={"token": "fresh"})
+    responses.post(f"{BASE}/api/auth/long-video/5/export", json={"status": "concatenating"}, status=202)
+    client = HeroShotsClient(BASE, token="stale", email="a@b.com", password="pw")
+    assert client.longvideo.export(5)["status"] == "concatenating"
+    assert client.token == "fresh"
