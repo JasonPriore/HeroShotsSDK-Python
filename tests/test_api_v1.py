@@ -294,3 +294,15 @@ def test_invalid_or_expired_token_triggers_relogin():
     client = HeroShotsClient(BASE, token="stale", email="a@b.com", password="pw")
     assert client.longvideo.export(5)["status"] == "concatenating"
     assert client.token == "fresh"
+
+
+@responses.activate
+def test_login_rejects_non_string_credentials():
+    from heroshots import ValidationError
+
+    client = HeroShotsClient(BASE)
+    with pytest.raises(ValidationError):
+        client.login("a@b.com", {"password": "x"})
+    with pytest.raises(ValidationError):
+        client.login("", "pw")
+    assert len(responses.calls) == 0

@@ -30,7 +30,7 @@ from typing import Any, BinaryIO, Optional, Union
 
 import requests
 
-from .errors import ApiError, RateLimitError, TokenExpiredError, error_from_response
+from .errors import ApiError, RateLimitError, TokenExpiredError, ValidationError, error_from_response
 from .models import wrap
 from .resources.account import Account
 from .resources.agency import Agency
@@ -155,6 +155,11 @@ class HeroShotsClient:
 
     def login(self, email: str, password: str) -> dict[str, Any]:
         """POST /api/auth/login -> stores and returns the JWT + profile."""
+        if not isinstance(email, str) or not email or not isinstance(password, str) or not password:
+            raise ValidationError(
+                "login(email, password): email and password must be non-empty strings",
+                code="validation_error",
+            )
         data = self.request(
             "POST",
             "/api/auth/login",
