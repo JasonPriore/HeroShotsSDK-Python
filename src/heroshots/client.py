@@ -27,6 +27,7 @@ import os
 import time
 from pathlib import Path
 from typing import Any, BinaryIO, Optional, Union
+from urllib.parse import urlsplit
 
 import requests
 
@@ -34,6 +35,7 @@ from .errors import ApiError, RateLimitError, TokenExpiredError, ValidationError
 from .models import wrap
 from .resources.account import Account
 from .resources.agency import Agency
+from .resources.audio import Audio
 from .resources.avatars import Avatars
 from .resources.brand import Brand
 from .resources.bulk import Bulk
@@ -116,6 +118,7 @@ class HeroShotsClient:
         self.categories = Categories(self)
         # Files, compliance, relationships.
         self.uploads = Uploads(self)
+        self.audio = Audio(self)
         self.legal = Legal(self)
         self.agency = Agency(self)
         self.brand = Brand(self)
@@ -270,8 +273,14 @@ class HeroShotsClient:
         ``unwrap`` controls envelope handling; when ``None`` it is inferred from the
         path (``/api/v1/*`` responses are wrapped in ``{"success","data","meta"}``).
         ``raw=True`` returns the response body as ``bytes`` (file downloads).
+
+        ``path`` may also be an absolute ``http(s)://`` URL; the Authorization and
+        X-Managed-User-Id headers are then sent only when it points at the API host
+        (same scheme, host and port as ``base_url``), never to a third-party CDN.
         """
-        url = self.base_url + path
+        url = path if _is_absolute_url(path) else self.base_url + path
+        if auth and _is_absolute_url(path) and not self._is_api_url(path):
+            auth = False
         headers: dict[str, str] = {"User-Agent": f"heroshots-python/{_sdk_version()}"}
         if not raw:
             headers["Accept"] = "application/json"
@@ -352,7 +361,12 @@ class HeroShotsClient:
         *,
         params: Optional[dict[str, Any]] = None,
     ) -> Union[bytes, str]:
-        """GET a binary endpoint. Returns ``bytes``, or writes ``dest`` and returns its path."""
+        """GET a binary endpoint or file URL. Returns ``bytes``, or writes ``dest`` and returns its path.
+
+        ``path`` is an API path (``/api/v1/video/42/download``) or an absolute
+        ``http(s)://`` URL such as ``final_video_url`` /
+        ``captioned_final_video_url``. The token is sent only to the API host.
+        """
         content = self.request("GET", path, params=params, raw=True)
         if dest is None:
             return content
@@ -360,6 +374,10 @@ class HeroShotsClient:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(content)
         return str(target)
+
+    def _is_api_url(self, url: str) -> bool:
+        """True when ``url`` has the same scheme, host and port as ``base_url``."""
+        return _origin(url) == _origin(self.base_url)
 
     @staticmethod
     def _file_tuple(file: FileInput, default_name: str = "file") -> Any:
@@ -377,6 +395,22 @@ class HeroShotsClient:
     def _multipart_file(cls, file: FileInput, field: str = "file") -> dict[str, Any]:
         """Build a ``files=`` dict for ``requests`` from a path, bytes or open file."""
         return {field: cls._file_tuple(file)}
+
+
+def _is_absolute_url(value: str) -> bool:
+    return isinstance(value, str) and value[:8].lower().startswith(("http://", "https://"))
+
+
+def _origin(url: str) -> tuple:
+    parts = urlsplit(url)
+    scheme = (parts.scheme or "").lower()
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    if port is None:
+        port = {"http": 80, "https": 443}.get(scheme)
+    return scheme, (parts.hostname or "").lower(), port
 
 
 def _json_or_none(resp: requests.Response) -> Any:

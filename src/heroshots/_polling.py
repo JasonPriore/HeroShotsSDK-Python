@@ -36,9 +36,12 @@ def wait(
     interval: float = 3.0,
     timeout: float = 600.0,
     on_progress: Optional[Callable[[dict[str, Any]], None]] = None,
+    ready: Optional[Callable[[dict[str, Any]], bool]] = None,
 ) -> dict[str, Any]:
     """Poll ``get_fn`` until the job reaches a terminal state.
 
+    ``ready`` (optional) is asked on a successful state: while it returns False
+    the job keeps being polled (e.g. a long video whose auto-edit still runs).
     Returns the final status payload on success. Raises :class:`ProviderError`
     on a failed job and :class:`TimeoutError` if the deadline passes.
     """
@@ -50,7 +53,7 @@ def wait(
         if on_progress is not None:
             on_progress(payload)
         status = str(payload.get(status_key) or "").lower()
-        if status in ok:
+        if status in ok and (ready is None or ready(payload)):
             return payload
         if status in fail:
             err = payload.get("error") or {}

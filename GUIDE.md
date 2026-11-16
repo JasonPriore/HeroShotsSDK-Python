@@ -12,7 +12,7 @@ L'SDK copre tutta l'API pubblica `/api/v1` più il flusso StudioHero:
 | Video corto | `videos` |
 | Video lungo (multi-segmento), rigenerare un segmento | `longvideo` |
 | Still-life video | `stilllife` |
-| Studio Hero (storyboard, tutte le fasi) | `storyboard` + `longvideo` |
+| Studio Hero (storyboard, tutte le fasi, voci, montaggio automatico) | `storyboard` + `audio` + `longvideo` |
 | Avatar: lista, creazione, modifica, outfit, voce, avatar sheet | `avatars` |
 | Generazione in serie (bulk) | `bulk` |
 | Storico generazioni e download dei file | `generations`, `images.download`, `videos.download` |
@@ -242,7 +242,7 @@ client.stilllife.change_background(task["task_id"], background_url="bg2.jpg")
 ## 5. Video lungo
 
 Pipeline multi-segmento. Puoi avviarla da una semplice immagine + prompt, oppure
-da uno storyboard di Studio Hero (vedi §6).
+da uno storyboard di Studio Hero (vedi §6: `start_from_storyboard`).
 
 ```python
 job = client.longvideo.start(
@@ -251,6 +251,9 @@ job = client.longvideo.start(
     ratio="16:9",
     resolution="1080p",
     duration_seconds=30,          # 30, 45 o 60
+    # Facoltativo (solo con login): montaggio automatico dopo l'export.
+    montage={"brief": "Sconto 20% fino a domenica", "language_code": "it",
+             "logo_url": "https://cdn/.../logo.png", "logo_mode": "in_video"},
 )
 
 # Attende che tutti i segmenti siano pronti (status "segments_ready").
@@ -262,8 +265,10 @@ for seg in ready["segments"]:
 client.longvideo.regenerate_segment(job["job_id"], 1, comment="più lento", cascade=True)
 
 # Montaggio finale (solo con login): unisce i segmenti in final_video_url.
+# Se è stato chiesto il montaggio automatico, render() aspetta anche quello.
 final = client.longvideo.render(job["job_id"])     # = wait + export + attesa
-print(final["final_video_url"])
+video_url = final.get("captioned_final_video_url") or final["final_video_url"]
+client.download(video_url, "out/spot.mp4")         # accetta anche URL assoluti
 ```
 
 Come nel portale, quando i segmenti sono pronti il job si ferma in
@@ -272,7 +277,25 @@ video unico. L'export non costa nulla. Con una **API key** l'export non è
 disponibile: usi i singoli `segments[].video_url`. I video con doppiaggio
 arrivano già a `done` con `final_video_url`.
 
-**Esempio di risultato (`final`):**
+**Montaggio automatico** (grafiche, sottotitoli karaoke, logo, cartello finale):
+
+- all'avvio: `montage={...}` (campi `brief`, `language_code`, `logo_url`,
+  `logo_mode` = `"in_video"` | `"end_only"` | `"off"`, `inserts` =
+  `[{"url", "label"}]`, immagini mostrate solo nel montaggio);
+- dopo la generazione: `client.longvideo.montage(job_id, brief=..., logo_mode=...)`.
+  Risponde 202 (parte subito, status `captioning`) oppure con `needs_export: true`
+  se il video non è ancora esportato (parte al prossimo `export()`); poi
+  `render(job_id)`.
+
+Lo status passa `done` → `captioning` → `done`. I campi da guardare:
+`montage_requested`, `montage_pending`, `montage_progress`, `montage_done`,
+`montage_report`. Il video montato è **`captioned_final_video_url`**;
+`final_video_url` resta il taglio senza montaggio. Se il montaggio fallisce,
+`render()` ritorna con `montage_done: false` e `montage_report.error` (il video
+originale resta disponibile). `client.longvideo.montage_available()` dice se il
+server può fare il montaggio.
+
+**Esempio di risultato (`final`, con montaggio):**
 ```json
 {
   "job_id": 812,
@@ -284,110 +307,193 @@ arrivano già a `done` con `final_video_url`.
     { "index": 1, "status": "done", "video_url": "https://cdn/.../seg1.mp4" },
     { "index": 2, "status": "done", "video_url": "https://cdn/.../seg2.mp4" }
   ],
-  "final_video_url": "https://cdn.heroshots.ai/out/long_812.mp4"
+  "final_video_url": "https://app.heroshots.ai/image/proxy/long_video/812/final.mp4",
+  "captioned_final_video_url": "https://app.heroshots.ai/image/proxy/long_video/812/montage/final.mp4",
+  "montage_requested": true,
+  "montage_pending": false,
+  "montage_done": true,
+  "montage_report": { "kind": "full" }
 }
 ```
+
+`client.download(url, dest)` accetta un URL assoluto: il token viene inviato
+solo se l'URL è dell'host dell'API (`base_url`), mai a un CDN esterno.
 
 ---
 
 ## 6. Studio Hero — tutte le fasi
 
-Il flusso creativo completo del web app: brief → candidati → storyboard →
-reference frame 4K → (revisione) → render video lungo.
+Il flusso del web app, passo per passo: brief → concept → (consigliato) →
+storyboard → reference frame 4K → (board) → (revisione) → voci → render con voce
+e montaggio automatico → download. Solo con login (portal JWT).
 
 ```python
 # --- Fase 0: referenze (path locali → URL ospitati) ---
 product = client.uploads.image("product.jpg", folder="products")["public_url"]
 subject = client.uploads.image("model.jpg", folder="subjects")["public_url"]
-duration = 30
 
-# --- Fase 1: brief suggeriti dall'AI a partire dalle immagini ---
-briefs = client.storyboard.brief_suggestions(
-    product_image_url=product, subject_image_url=subject,
-    duration_seconds=duration, language_code="it",
+# Campi che il portale manda a ogni chiamata storyboard (vedi tabella sotto).
+common = dict(
+    product_image_url=product,
+    subject_image_url=subject,
+    duration_seconds=30,              # 30, 45 o 60 per il video lungo
+    ratio="9:16",
+    resolution="1080p",
+    language_code="it",
+    video_type="ugc",                 # ugc | cinema | spot_tv | sas_software
+    ugc_style="top_creator",          # amateur | top_creator
+    look_mode="current",              # tiene l'outfit del soggetto
+    storyboard_reference_frames_required=True,
+    storyboard_board_required=False,
 )
-brief = briefs[0]                      # es. l'utente sceglie il primo
 
-# --- Fase 2: concept candidati → se ne sceglie uno ---
-candidates = client.storyboard.candidates(
-    custom_prompt=brief, duration_seconds=duration,
-    product_image_url=product, subject_image_url=subject,
-    ratio="16:9", language_code="it",
-)
-selected = candidates[0]
+# --- Fase 1: brief suggeriti + quello consigliato ---
+briefs = client.storyboard.brief_suggestions(**common)      # [{title, brief, pros, cons}]
+rec = client.storyboard.recommend("brief", briefs, **common)
+brief = briefs[rec["recommended_index"]]["brief"]
+
+# --- Fase 2: concept candidati + quello consigliato ---
+concepts = client.storyboard.candidates(custom_prompt=brief, **common)
+rec = client.storyboard.recommend("concept", concepts, custom_prompt=brief,
+                                  chosen_brief=brief, **common)
+selected = concepts[rec["recommended_index"]]
 
 # --- Fase 3: storyboard completo (async, frame differiti) ---
-job = client.storyboard.generate(
-    custom_prompt=brief, duration_seconds=duration, selected_candidate=selected,
-    product_image_url=product, subject_image_url=subject,
-)
-sb = client.storyboard.wait(job["job_id"])          # status = "done"
-storyboard = sb.get("storyboard") or sb.get("result")
+job = client.storyboard.generate(custom_prompt=brief, selected_candidate=selected, **common)
+storyboard = client.storyboard.wait(job["job_id"])["storyboard"]
 
 # --- Fase 4: reference frame 4K (async, con progresso) ---
-fjob = client.storyboard.frames(storyboard, product_image_url=product, subject_image_url=subject)
-frames = client.storyboard.wait(
-    fjob["job_id"],
-    on_progress=lambda d: print("  frame pronti:", len(d.get("frames_partial") or {})),
+if storyboard.get("reference_frames_deferred"):
+    fjob = client.storyboard.frames(storyboard, **common)
+    frames = client.storyboard.wait(
+        fjob["job_id"], timeout=900,
+        on_progress=lambda d: print("  frame pronti:", len(d.get("frames_partial") or {})),
+    )
+    storyboard = client.storyboard.merge(storyboard, frames)
+
+# --- Fase 4b (se il server usa la board): immagine storyboard board ---
+# bjob = client.storyboard.board(storyboard, **common)
+# storyboard = client.storyboard.merge(storyboard, client.storyboard.wait(bjob["job_id"], timeout=900))
+
+# --- Fase 5 (opzionale): revisione — la risposta È lo storyboard rivisto ---
+# rev_fields = {k: v for k, v in common.items() if k != "duration_seconds"}
+# storyboard = client.storyboard.revise("Rendi il segmento 2 più lento", brief, 30, storyboard,
+#                                       selected_candidate=selected, **rev_fields)
+# (dopo una revisione rifai la Fase 4 per i nuovi frame)
+
+# --- Fase 6: voci, una per ruolo che parla ---
+voices = client.audio.voices()["voices"]          # [{voice_id, name, category, labels, ...}]
+roles = client.storyboard.voice_roles(storyboard) # [{key: "subject_1", label, role_type, text, ...}]
+voice_ids = {role["key"]: voices[0]["voice_id"] for role in roles}   # scegli tu la voce per ruolo
+
+# --- Fase 7: render come il portale (voce + montaggio automatico) ---
+vjob = client.longvideo.start_from_storyboard(
+    storyboard,
+    product_image_url=product,
+    subject_image_url=subject,
+    # oppure un avatar: avatar_id=12, avatar_view_type="mezzo_busto"  (vista reale, non "avatar")
+    voice_id=voice_ids,               # o una sola voce per tutti i ruoli: voice_id="..."
+    language_code="it",
+    montage=True,                     # brief, lingua e logo come nel portale
+    brief=brief,
+    ratio="9:16",
+    resolution="1080p",
+    # brand_logo_url="https://cdn/.../logo.png", brand_logo_mode="in_video",
 )
-storyboard = frames.get("storyboard") or storyboard
+final = client.longvideo.render(vjob["job_id"])   # segmenti → export → montaggio
 
-# --- Fase 5 (opzionale): revisione ---
-# rev = client.storyboard.revise("Rendi il segmento 2 più lento", brief, duration, storyboard)
-# storyboard = rev.get("storyboard") or storyboard
-
-# --- Fase 6: render video lungo dallo storyboard ---
-vjob = client.longvideo.start(image_url=product, storyboard=storyboard, ratio="16:9")
-final = client.longvideo.render(vjob["job_id"])     # segmenti + montaggio finale
-print(final["final_video_url"])
+# --- Fase 8: download del video montato ---
+url = final.get("captioned_final_video_url") or final["final_video_url"]
+client.download(url, "out/spot.mp4")
 ```
+
+**Cosa manda `start_from_storyboard`** (lo stesso body del portale):
+
+| Campo | Da dove |
+|---|---|
+| `product_image_url`, `subject_image_url`, `additional_product_image_urls` | input |
+| `avatar_id` + `avatar_view_type` (+ `avatar_image_set`) | input; la vista deve esistere (`fullbody`, `mezzo_busto`, `closeup`, `profile_left`...); `"avatar"` viene rifiutato |
+| `product_box_closed_url` / `product_box_open_url`, `extra_products` (`[{image_url, box_closed_url?, box_open_url?}]`) | input (scatola del prodotto, altri prodotti) |
+| `brand_logo_url` + `brand_logo_mode` (`in_video` \| `end_only` \| `off`) | input |
+| `custom_prompt` | `storyboard["optimized_prompt"]` (non il brief) |
+| `duration` e `duration_seconds` | `storyboard["duration_seconds"]` |
+| `studiohero_segment_prompts` | `visual_prompt` (o `seedance_prompt`) di ogni segmento |
+| `studiohero_segment_reference_image_urls` | per segmento: `script_sequence.reference_frames[].image_url` + `control_frame.image_url` (omesso se non ci sono frame) |
+| `reference_image_urls` | board, prodotto, viste extra, soggetto (senza doppioni) |
+| `voiceover_cast`, `tts_voice_id`, `language_code` | `storyboard.voice_cast(storyboard, voice_id)`; `tts_voice_id` = voce del primo ruolo |
+| `montage` | `montage=True` → `{brief, language_code, logo_url, logo_mode}`; senza montaggio e con logo `end_only` → `{kind: "outro", ...}` (solo la chiusura animata del logo) |
+
+Gli argomenti extra (`captions=True`, `reference_video_url=...`) vengono inoltrati
+così come sono e vincono su tutto. `longvideo.start(storyboard=...)` resta
+disponibile e manda solo la parte storyboard (`custom_prompt`, prompt e frame per
+segmento, durata).
+
+**Campi delle chiamate storyboard** (in `common`): `video_type` (`ugc` |
+`cinema` | `spot_tv` | `sas_software`), `ugc_style` (`amateur` | `top_creator`),
+`look_mode` (`current`, oppure `custom` con `look_description`),
+`storyboard_reference_frames_required` / `storyboard_board_required`, più gli
+stessi input del render (`avatar_id` + `avatar_view_type`, `brand_logo_url` /
+`brand_logo_mode`, `product_box_closed_url` / `product_box_open_url`,
+`extra_products`, `background_image_url`, `body_posture_image_url`).
 
 **Esempio di risultato per fase:**
 
 Fase 1 — `brief_suggestions` →
 ```json
-["Spot dinamico urban per il lancio sneaker",
- "Mood luxury slow-motion con focus sul materiale",
- "Storytelling lifestyle: dalla città al primo piano prodotto"]
+[{ "title": "Drop urbano", "brief": "Spot dinamico urban per il lancio sneaker...", "pros": ["..."], "cons": ["..."] },
+ { "title": "Luxury slow", "brief": "Mood luxury slow-motion con focus sul materiale...", "pros": [], "cons": [] }]
+```
+
+Fase 1/2 — `recommend` →
+```json
+{ "recommended_index": 0, "reason": "Il prodotto si vede meglio con un taglio dinamico." }
 ```
 
 Fase 2 — `candidates` (un elemento) →
 ```json
 {
+  "id": "concept-1",
   "title": "Urban Drop",
-  "angle": "energia di strada, taglio rapido",
-  "clips": [{ "beat": "reveal", "action": "..." }, { "beat": "detail", "action": "..." }],
-  "speaker": "voiceover maschile, tono hype",
-  "payoff": "logo + claim finale"
+  "logline": "energia di strada, taglio rapido",
+  "visual_direction": "camera a mano, luce naturale",
+  "clip_plan": ["reveal", "dettaglio", "logo + claim"],
+  "voice_roles": ["Soggetto"]
 }
 ```
 
-Fase 3 — `wait(job["job_id"])` →
+Fase 3 — `wait(job["job_id"])["storyboard"]` →
 ```json
 {
-  "job_id": "sb_4d10", "status": "done",
-  "storyboard": {
-    "segments": [
-      { "index": 0, "visual_prompt": "...", "frame_prompt": "...", "image_url": null },
-      { "index": 1, "visual_prompt": "...", "frame_prompt": "...", "image_url": null }
-    ],
-    "reference_frames_pending": true
-  }
+  "duration_seconds": 30,
+  "optimized_prompt": "...",
+  "segments": [
+    { "index": 1, "visual_prompt": "...", "voiceover_text": "...",
+      "script_sequence": { "voice_cast": [{ "role_id": "subject_1", "label_it": "Soggetto", "spoken_it": "..." }],
+                           "reference_frames": [{ "role": "start", "image_url": null }] } }
+  ],
+  "reference_frames_deferred": true,
+  "storyboard_board_image_url": null
 }
 ```
 
-Fase 4 — `wait(fjob["job_id"])` (i frame diventano URL) →
+Fase 4 — `wait(fjob["job_id"])` (i frame arrivano sotto `frames`) →
 ```json
 {
   "job_id": "fr_88a1", "status": "done",
-  "storyboard": { "segments": [
-    { "index": 0, "image_url": "https://cdn/.../seg0_start.png" },
-    { "index": 1, "image_url": "https://cdn/.../seg1_start.png" }
-  ] }
+  "frames": { "segments": [
+    { "index": 1, "script_sequence": { "reference_frames": [{ "role": "start", "image_url": "https://cdn/.../seg1_start.png" }] } }
+  ], "reference_image_urls": ["https://cdn/.../seg1_start.png"] }
 }
 ```
 
-Fase 6 — `final` → vedi [§5](#5-video-lungo) (`final_video_url`).
+Fase 6 — `audio.voices()` →
+```json
+{ "configured": true,
+  "voices": [{ "voice_id": "21m00Tcm4TlvDq8ikWAM", "name": "Giulia", "category": "premade",
+               "labels": { "accent": "italian" }, "description": "", "preview_url": "https://..." }] }
+```
+
+Fase 7 — `final` → vedi [§5](#5-video-lungo) (`captioned_final_video_url`).
 
 > Vedi `examples/full_storyboard_flow.py` per lo script completo eseguibile.
 

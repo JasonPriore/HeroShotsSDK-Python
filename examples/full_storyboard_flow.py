@@ -1,7 +1,8 @@
 """End-to-end StudioHero flow, mirroring the web app, via the HeroShots SDK.
 
-Reproduces: login -> upload -> balance -> brief suggestions -> candidates ->
-storyboard -> reference frames -> long video. Every generation step is BILLABLE.
+Reproduces: login -> upload -> balance -> brief suggestions (+ recommended) ->
+concepts (+ recommended) -> storyboard -> reference frames -> voices -> long
+video with voice and auto-edit -> download. Every generation step is BILLABLE.
 
 Run:
     HEROSHOTS_EMAIL=dev@partner.com HEROSHOTS_PASSWORD=... \
@@ -26,50 +27,79 @@ def main(product_path: str, model_path: str) -> None:
     product_url = client.uploads.image(product_path, folder="products")["public_url"]
     subject_url = client.uploads.image(model_path, folder="subjects")["public_url"]
 
-    duration = 30
     # 2. (Optional) check the balance before spending credits.
     bal = client.balance()
     print("balance:", {"hs_credits": bal.get("hs_credits"), "wallet_balance": bal.get("wallet_balance")})
 
-    # 3. Brief suggestions.
-    briefs = client.storyboard.brief_suggestions(
-        product_image_url=product_url, subject_image_url=subject_url,
-        duration_seconds=duration, language_code="it",
+    # Fields the portal sends with every storyboard call.
+    common = dict(
+        product_image_url=product_url,
+        subject_image_url=subject_url,
+        duration_seconds=30,
+        ratio="9:16",
+        resolution="1080p",
+        language_code="it",
+        video_type="ugc",
+        ugc_style="top_creator",
+        look_mode="current",
+        storyboard_reference_frames_required=True,
     )
-    brief = briefs[0]
+
+    # 3. Brief suggestions -> the recommended one.
+    briefs = client.storyboard.brief_suggestions(**common)
+    index = client.storyboard.recommend("brief", briefs, **common)["recommended_index"] if len(briefs) > 1 else 0
+    brief = briefs[index]["brief"]
     print("brief:", brief)
 
-    # 4. Concept candidates -> pick one.
-    candidates = client.storyboard.candidates(
-        custom_prompt=brief, duration_seconds=duration,
-        product_image_url=product_url, subject_image_url=subject_url,
-        ratio="16:9", language_code="it",
-    )
-    selected = candidates[0]
+    # 4. Concept candidates -> the recommended one.
+    concepts = client.storyboard.candidates(custom_prompt=brief, **common)
+    index = 0
+    if len(concepts) > 1:
+        index = client.storyboard.recommend(
+            "concept", concepts, custom_prompt=brief, chosen_brief=brief, **common
+        )["recommended_index"]
+    selected = concepts[index]
+    print("concept:", selected.get("title"))
 
     # 5. Full storyboard (async, frames deferred).
-    job = client.storyboard.generate(
-        custom_prompt=brief, duration_seconds=duration, selected_candidate=selected,
-        product_image_url=product_url, subject_image_url=subject_url,
-    )
-    sb = client.storyboard.wait(job["job_id"])
-    storyboard = sb.get("storyboard") or sb.get("result")
+    job = client.storyboard.generate(custom_prompt=brief, selected_candidate=selected, **common)
+    storyboard = client.storyboard.wait(job["job_id"])["storyboard"]
     print("storyboard ready:", len(storyboard.get("segments", [])), "segments")
 
-    # 6. Reference frames (async, progressive).
-    fjob = client.storyboard.frames(
-        storyboard=storyboard, product_image_url=product_url, subject_image_url=subject_url,
-    )
-    frames = client.storyboard.wait(
-        fjob["job_id"],
-        on_progress=lambda d: print("  frames_partial:", d.get("frames_partial")),
-    )
-    storyboard = frames.get("storyboard") or storyboard
+    # 6. Reference frames (async, progressive) -> merged into the storyboard.
+    if storyboard.get("reference_frames_deferred"):
+        fjob = client.storyboard.frames(storyboard, **common)
+        frames = client.storyboard.wait(
+            fjob["job_id"],
+            timeout=900,
+            on_progress=lambda d: print("  frames ready:", len(d.get("frames_partial") or {})),
+        )
+        storyboard = client.storyboard.merge(storyboard, frames)
 
-    # 7. Long video render.
-    vjob = client.longvideo.start(image_url=product_url, storyboard=storyboard, ratio="16:9")
-    result = client.longvideo.render(vjob["job_id"])  # wait for clips, export, final cut
-    print("FINAL VIDEO:", result.get("final_video_url"))
+    # 7. One voice per speaking role.
+    voices = client.audio.voices().get("voices") or []
+    roles = client.storyboard.voice_roles(storyboard)
+    voice_ids = {role["key"]: voices[0]["voice_id"] for role in roles} if voices else None
+    print("roles:", [(r["key"], r["text"][:40]) for r in roles])
+
+    # 8. Long video, exactly like the portal's render, with the auto-edit.
+    vjob = client.longvideo.start_from_storyboard(
+        storyboard,
+        product_image_url=product_url,
+        subject_image_url=subject_url,
+        voice_id=voice_ids,
+        language_code="it",
+        montage=client.longvideo.montage_available(),
+        brief=brief,
+        ratio="9:16",
+        resolution="1080p",
+    )
+    final = client.longvideo.render(vjob["job_id"])  # clips -> export -> auto-edit
+    url = final.get("captioned_final_video_url") or final.get("final_video_url")
+    print("FINAL VIDEO:", url)
+
+    # 9. Download (absolute URLs are accepted).
+    print("saved to", client.download(url, "out/spot.mp4"))
 
 
 if __name__ == "__main__":
